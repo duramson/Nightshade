@@ -14,10 +14,12 @@
  void KeplerCompute::ProcessNativeReportSemaphore(u32 argument) {
      const GPUVAddr address = (GPUVAddr{native_registers[0x6c0] & 0x1ffffff} << 32) |
                               native_registers[0x6c1];
-@@ -98,6 +105,22 @@
-         LOG_WARNING(HW_GPU, "Native compute report semaphore operation {} not supported", operation);
-         return;
+@@ -96,6 +103,22 @@
      }
+     if (operation != 0 && operation != 2) {
+         LOG_WARNING(HW_GPU, "Native compute report semaphore operation {} not supported", operation);
++        return;
++    }
 +    if ((native_registers[0x6c0] & 0x1ffffff) == 0) {
 +        static u32 guarded{};
 +        if (guarded++ < 32) {
@@ -32,11 +34,25 @@
 +                          one_word ? VideoCommon::QueryPropertiesFlags::IsAFence
 +                                   : VideoCommon::QueryPropertiesFlags::HasTimeout,
 +                          payload, 0);
-+        return;
-+    }
+         return;
+     }
      if ((argument >> 3) & 1) {
-         const u32 reduction = (argument >> 9) & 7;
-         rasterizer->SignalFence([this, address, payload, reduction] {
+@@ -445,6 +468,15 @@
+         // thread went through ProcessNativeMethod's checks for them.
+         if (method < native_plain_methods.size() && native_plain_methods[method]) {
+             native_registers[method] = method_argument;
++            // The semaphore address registers: every write to them is logged (the first 32),
++            // so a release with a null address says which engine never got its A/B written.
++            if (method >= 0x6c0 && method <= 0x6c3) [[unlikely]] {
++                static u32 sem_writes{};
++                if (sem_writes++ < 32) {
++                    LOG_INFO(HW_GPU, "Native compute semaphore register {:#x} = {:#x} (engine {}, memory {})",
++                             method, method_argument, fmt::ptr(this), memory_manager.GetID());
++                }
++            }
+             if (method < Regs::NUM_REGS) {
+                 regs.reg_array[method] = method_argument;
+             }
 
 --- a/src/video_core/engines/kepler_compute.h
 +++ b/src/video_core/engines/kepler_compute.h
