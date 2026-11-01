@@ -17,6 +17,7 @@
 #include <cerrno>
 #include <cstring>
 #include <sys/stat.h>
+#include <sys/resource.h>
 #endif
 #ifdef EDEN_DEV_VULKAN
 #include "sdk_audit.h"
@@ -343,6 +344,21 @@ int main(int argc, char** argv) {
         if (Eden::FilesystemAccess()) {
             MigrateSandboxData();
             MoveGameFilesOutOfTheApp();
+            // Games with thousands of loose RomFS files keep many of them open at once (Mario
+            // Kart World was dying on "Too many open files" at the console's default limit,
+            // its RSDB tables came back null and its Prepare Thread jumped through one).
+            // Upstream's Qt frontend raises the limit for the same reason; do it here, where
+            // the console may let the raised limit through only after the elevation above.
+            struct ::rlimit nofile;
+            if (::getrlimit(RLIMIT_NOFILE, &nofile) == 0 && nofile.rlim_cur < 8192) {
+                nofile.rlim_cur = std::min<rlim_t>(8192, nofile.rlim_max);
+                if (::setrlimit(RLIMIT_NOFILE, &nofile) == 0) {
+                    Eden::BootTrace::Line("file-descriptor limit raised to %d", 8192);
+                } else {
+                    Eden::BootTrace::Line("file-descriptor limit stays %d (raise failed, errno %d)",
+                                          static_cast<int>(nofile.rlim_cur), errno);
+                }
+            }
         }
         for (const auto& folder : {Eden::UserDir(), Eden::ConfigDir(), Eden::CoversDir(), Eden::LogsDir()}) {
             std::error_code folder_error;
