@@ -1141,7 +1141,13 @@ string(FIND "${vfs_real_source}" "${open_files_old}" open_files_at)
 if(open_files_at LESS 0 OR NOT vfs_real_source MATCHES "size_t MaxOpenFiles\\(\\) {")
     message(FATAL_ERROR "Pinned vfs_real.cpp MaxOpenFiles changed")
 endif()
-string(REPLACE "${open_files_old}" "#else\n    return 512;\n#endif" vfs_real_source "${vfs_real_source}")
+# 512 sat exactly at the console's descriptor limit: the kernel keeps ~530 descriptors per
+# process regardless of what setrlimit asks (Mario Kart World opens its RomFS while hundreds
+# of files are held by the RomFS build), and every open past it failed with "Too many open
+# files" — the game kept null RSDB handles and its Prepare Thread jumped through one. Stay
+# well under the kernel's number: the cache evicts (reopening on the next read) instead of
+# the game seeing EMFILE.
+string(REPLACE "${open_files_old}" "#else\n    return 384;\n#endif" vfs_real_source "${vfs_real_source}")
 write_derived("${PORT_BUILD_DIR}/vfs_real.cpp" "${vfs_real_source}")
 list(REMOVE_ITEM core_sources "file_sys/vfs/vfs_real.cpp")
 list(APPEND core_sources "${PORT_BUILD_DIR}/vfs_real.cpp")

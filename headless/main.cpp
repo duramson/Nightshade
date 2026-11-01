@@ -349,8 +349,13 @@ int main(int argc, char** argv) {
             // its RSDB tables came back null and its Prepare Thread jumped through one).
             // Upstream's Qt frontend raises the limit for the same reason; do it here, where
             // the console may let the raised limit through only after the elevation above.
+            // Log what the kernel reports either way: it caps the descriptor count on its own.
             struct ::rlimit nofile;
-            if (::getrlimit(RLIMIT_NOFILE, &nofile) == 0 && nofile.rlim_cur < 8192) {
+            if (::getrlimit(RLIMIT_NOFILE, &nofile) != 0) {
+                Eden::BootTrace::Line("file-descriptor limit: getrlimit failed, errno %d", errno);
+            } else if (nofile.rlim_cur == RLIM_INFINITY) {
+                Eden::BootTrace::Line("file-descriptor limit: unlimited soft limit");
+            } else if (nofile.rlim_cur < 8192) {
                 nofile.rlim_cur = std::min<rlim_t>(8192, nofile.rlim_max);
                 if (::setrlimit(RLIMIT_NOFILE, &nofile) == 0) {
                     Eden::BootTrace::Line("file-descriptor limit raised to %d", 8192);
@@ -358,6 +363,10 @@ int main(int argc, char** argv) {
                     Eden::BootTrace::Line("file-descriptor limit stays %d (raise failed, errno %d)",
                                           static_cast<int>(nofile.rlim_cur), errno);
                 }
+            } else {
+                Eden::BootTrace::Line("file-descriptor limit: soft limit already %d (hard %d)",
+                                      static_cast<int>(nofile.rlim_cur),
+                                      nofile.rlim_max == RLIM_INFINITY ? -1 : static_cast<int>(nofile.rlim_max));
             }
         }
         for (const auto& folder : {Eden::UserDir(), Eden::ConfigDir(), Eden::CoversDir(), Eden::LogsDir()}) {
